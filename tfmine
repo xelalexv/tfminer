@@ -1,0 +1,342 @@
+#!/usr/bin/env bash
+
+RUN="$(basename "$0")"
+
+# formatting
+BOLD="\e[1m"
+NORMAL="\e[0m"
+OK="\e[01;32m"
+ERROR="\e[01;31m"
+
+#
+#
+#
+function synopsis {
+(cat <<EOF
+
+${BOLD}NAME${NORMAL}
+        tfminer - mining 'terraform plan' console output
+
+${BOLD}SYNOPSIS${NORMAL}
+        ${RUN} ls  [-f|--file {input file}] [-i|--item {item filter}]
+                   [filter flags]
+        ${RUN} get [-f|--file {input file}] [-i|--item {item spec}]
+                   [-p|--property {property spec} [-o|--old|-n|--new]]
+
+${BOLD}DESCRIPTION${NORMAL}
+        Tfminer is a simple parser for extracting information from
+        console output generated when running Terraform's plan command
+        (called plan hereafter). It was originally created to help
+        testing Terraform templates. Terraform currently only allows to
+        save plans in binary format, which has no stable specification
+        and does not lend itself to easy information extraction.
+        Implementing Tfminer as a plain shell script was a deliberate
+        design choice, to avoid pulling in additional dependencies into
+        the tested projects.
+
+${BOLD}COMMANDS${NORMAL}
+        ls      list all items in a plan; scope can be limited with item
+                filter substring and/or filter flags
+        get     get a particular item; when additionally providing a
+                property spec, the value of that property on the
+                retrieved item is returned.
+
+${BOLD}OPTIONS${NORMAL}
+        -f|--file       input file containing the plan; reads from
+                        stdin when omitted
+
+        -i|--item       item filter substring for 'ls', item spec
+                        for 'get'
+
+        -p|--property   property to get from item, requires --item
+
+        -o|--old        get old value of property, empty if it's
+                        unchanged, requires --property
+
+        -n|--new        get new value of property, empty if it's
+                        unchanged, requires --property
+
+        --no-fail       exit with 0 even when nothing found
+
+        filter flags:
+        -c|--created    created items
+        -u|--updated    updated items
+        -r|--recreated  recreated items
+        -d|--destroyed  destroyed items
+
+        Multiple flags can be specified. If no flags are present, all
+        items are considered, otherwise only those for which a flag is
+        set.
+
+${BOLD}EXIT CODES${NORMAL}
+        0       requested entity was found, or --no-fail is set
+        1       requested entity was not found
+       20       error
+
+EOF
+) | xargs --null echo -ne | more
+}
+
+#
+# $1    message
+#
+function stop_script {
+    echo -e "\n$1\n"
+    exit 20
+}
+
+#
+# $1    message
+# $2    parameter to check; stops if missing
+#
+function stop_missing {
+    [ -z "$2" ] && stop_script "$1"
+}
+
+#
+# $1    value
+#
+function stop_not_found {
+    if [ -z "$1" ]; then
+        [ "${no_fail}" = "true" ] && exit 0
+        exit 1
+    fi
+}
+
+#
+# Remove escape sequences, e.g. colors from string.
+#
+# $1    string to strip; if omitted, reads from stdin
+#
+function strip_escapes {
+    if [ -n "$1" ]; then
+        echo -n "$1" | strip_escapes
+    else
+        sed -r 's/\x1b\[[0-9;]*m?//g'
+    fi
+}
+
+#
+# Escape characters in string so that they are not interpreted as
+# regex meta-characters, i.e. treat it as all literals.
+#
+# $1    string to escape; if omitted, reads from stdin
+#
+# https://stackoverflow.com/questions/29613304/is-it-possible-to-escape-regex-metacharacters-reliably-with-sed
+#
+function escape_meta_chars {
+    if [ -n "$1" ]; then
+        echo -n "$1" | escape_meta_chars
+    else
+        sed 's/[^^]/[&]/g; s/\^/\\^/g'
+    fi
+}
+
+#
+# $1    string to unquote
+#
+function unquote {
+    local u="${1%\"}"
+    u="${u#\"}"
+    echo -n "${u}"
+}
+
+#
+# $1    status markers, as "a|b|c"
+# $2    item pattern, "*" for any
+# $3    file; if omitted, reads from stdin
+#
+function list_items {
+    if [ -n "$3" ]; then
+        cat "$3" | list_items "$1" "$2"
+    else
+        list="$(strip_escapes | \
+            sed -n -r "s/^([[:space:]]*($1)[[:space:]]+([_[:alnum:]-]+\.)+[][_\.[:alnum:]-]+)([[:space:]]+\([^\)]+\))?$/\1/p")"
+        if [ "$2" != "*" ]; then
+            local escaped="$(escape_meta_chars "$2")"
+            sed -n -r "/^.*${escaped}.*$/p" <<<"${list}"
+        else
+            echo "${list}"
+        fi
+    fi
+}
+
+#
+# $1    item
+# $2    status markers, as "a|b|c"
+# $3    file; if omitted, reads from stdin
+#
+function get_item {
+    if [ -n "$3" ]; then
+        cat "$3" | get_item "$1" "$2"
+    else
+        local item="$(escape_meta_chars "$1")"
+        strip_escapes | \
+            sed -n -r "/^[[:space:]]*($2)[[:space:]]+${item}([[:space:]]+\([^\)]+\))?$/,/^[[:space:]]*$/p"
+    fi
+}
+
+#
+# $1    item
+# $2    property name
+# $3    old|new (optional)
+#
+function get_property {
+
+    local escaped="$(escape_meta_chars "$2")"
+    local prop="$(sed -n -r "s/^[[:space:]]*${escaped}[.#]*\:[[:space:]]+(.*)$/\1/p" <<<"$1")"
+
+    if [ -z "${prop}" ]; then
+        return
+    fi
+
+    local old_prop="$(sed -n -r "s/^(\"(\\\"|[^\"]*)*\"|<computed>)[[:space:]]+\=>[[:space:]]+(.*)$/\1/p" <<<"${prop}")"
+    local new_prop="$(sed -n -r "s/^.*[[:space:]]+\=>[[:space:]]+(\"(\\\"|[^\"]*)*\"|<computed>)([[:space:]]+\([^\)]+\))?$/\1/p" <<<"${prop}")"
+
+    if [ "$3" = "old" ]; then
+        echo -n "$(unquote ${old_prop})"
+    elif [ "$3" = "new" ]; then
+        echo -n "$(unquote ${new_prop})"
+    elif [ -n "${old_prop}" ] || [ -n "${new_prop}" ]; then
+        echo -n "${prop}" # don't unquote if we have a changed property
+    else
+        echo -n "$(unquote "${prop}")"
+    fi
+}
+
+#
+# $1    item
+# $2    property name
+# $3    old|new (optional) FIXME
+#
+function get_list_property {
+    local escaped="$(escape_meta_chars "$2")"
+    sed -n -r "s/^[[:space:]]*${escaped}\.([[:alnum:]]+)\:[[:space:]]+(.*)$/\1=\2/p" <<<"$1"
+}
+
+#
+#
+#
+
+if [ $# -eq 0 ]; then
+    synopsis
+    exit 0
+fi
+
+MARKER_CREATED="$(escape_meta_chars "+")"
+MARKER_UPDATED="$(escape_meta_chars "~")"
+MARKER_RECREATED="$(escape_meta_chars "-/+")"
+MARKER_DESTROYED="$(escape_meta_chars "-")"
+ALL_MARKERS="${MARKER_CREATED}|${MARKER_UPDATED}|${MARKER_RECREATED}|${MARKER_DESTROYED}"
+
+item=""
+prop=""
+prop_version=""
+input=""
+status=""
+no_fail=""
+cmd="$1"
+shift
+
+case "${cmd}" in
+    "ls"|"get")
+        ;;
+    "-h"|"--help")
+        synopsis
+        exit 0
+        ;;
+    *)
+        stop_script "unknown command: ${cmd}"
+        ;;
+esac
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        "-f"|"--file")
+            stop_missing "no input file given" "$2"
+            input="$2"
+            [ ! -r "${input}" ] && \
+                stop_script "input file '${input}' does not exist or is not accessible"
+            shift 2
+            ;;
+        "-i"|"--item")
+            stop_missing "no item given" "$2"
+            item="$2"
+            shift 2
+            ;;
+        "-p"|"--property")
+            stop_missing "no property given" "$2"
+            [ "${cmd}" = "ls" ] && stop_script "ls does not use properties"
+            prop="$2"
+            shift 2
+            ;;
+        "-c"|"--created")
+            status="${status:+${status}|}${MARKER_CREATED}"
+            shift
+            ;;
+        "-u"|"--updated")
+            status="${status:+$status|}${MARKER_UPDATED}"
+            shift
+            ;;
+        "-r"|"--recreated")
+            status="${status:+$status|}${MARKER_RECREATED}"
+            shift
+            ;;
+        "-d"|"--destroyed")
+            status="${status:+$status|}${MARKER_DESTROYED}"
+            shift
+            ;;
+        "-o"|"--old")
+            [ -n "${prop_version}" ] && stop_script "--old/-o cannot be used with --new/-n"
+            prop_version="old"
+            shift
+            ;;
+        "-n"|"--new")
+            [ -n "${prop_version}" ] && stop_script "--new/-n cannot be used with --old/-o"
+            prop_version="new"
+            shift
+            ;;
+        "--no-fail")
+            no_fail="true"
+            shift
+            ;;
+        *)
+            stop_script "unknown option or parameter: $1"
+            ;;
+    esac
+done
+
+status="${status:-$ALL_MARKERS}"
+
+case "${cmd}" in
+
+    "ls")
+
+        list_items "${status}" "${item:-"*"}" "${input}"
+        ;;
+
+    "get")
+
+        stop_missing "no item specified" "${item}"
+        i="$(get_item "${item}" "${status}" "${input}")"
+        stop_not_found "${i}"
+
+        if [ -n "${prop}" ]; then
+
+            # property requested
+            p="$(get_property "${i}" "${prop}" "${prop_version}")"
+
+            if [ -n "${p}" ]; then
+                echo "${p}"
+            else
+                # property not found, maybe it's a property list?
+                p="$(get_property "${i}" "${prop}.%")"
+                stop_not_found "${p}"
+                get_list_property "${i}" "${prop}"
+            fi
+        else
+            echo -e "${i}"
+        fi
+        ;;
+
+esac
