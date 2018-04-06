@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/xelalexv/tfminer.svg?branch=master)](https://travis-ci.org/xelalexv/tfminer)
 
 # *tfminer*
 
