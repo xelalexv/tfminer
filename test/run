@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+cd "$(dirname "${BASH_SOURCE}")"
+
 echo -e "\nrunning all tests...\n"
 
 exit_code=0
