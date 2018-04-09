@@ -25,25 +25,25 @@ ${BOLD}SYNOPSIS${NORMAL}
 
 ${BOLD}DESCRIPTION${NORMAL}
         Tfminer is a simple parser for extracting information from
-        console output generated when running Terraform's plan command
-        (called plan hereafter). It was originally created to help
+        Terraform console output, in particular for output generated when
+        running the 'plan' command. It was originally created to help
         testing Terraform templates. Terraform currently only allows to
         save plans in binary format, which has no stable specification
         and does not lend itself to easy information extraction.
         Implementing Tfminer as a plain shell script was a deliberate
         design choice, to avoid pulling in additional dependencies into
-        the tested projects.
+        tested projects.
 
 ${BOLD}COMMANDS${NORMAL}
-        ls      list all items in a plan; scope can be limited with item
+        ls      list all items in TF output; scope can be limited with item
                 filter substring and/or filter flags
         get     get a particular item; when additionally providing a
                 property spec, the value of that property on the
                 retrieved item is returned.
 
 ${BOLD}OPTIONS${NORMAL}
-        -f|--file       input file containing the plan; reads from
-                        stdin when omitted
+        -f|--file       file containing the TF output; reads from stdin
+                        when omitted
 
         -i|--item       item filter substring for 'ls', item spec
                         for 'get'
