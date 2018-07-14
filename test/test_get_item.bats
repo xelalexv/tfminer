@@ -5,9 +5,9 @@ load './libs/bats-assert/load'
 load './helper'
 
 @test "get item from file" {
-  run ${TFMINE} get -f ${PLANS}/long -i aws_route.internet
-  assert_success
-  assert_output \
+    run ${TFMINE} get -f ${PLANS}/long -i aws_route.internet
+    assert_success
+    assert_output \
 '  + aws_route.internet
       id:                                        <computed>
       destination_cidr_block:                    "0.0.0.0/0"
@@ -24,9 +24,9 @@ load './helper'
 }
 
 @test "get item from stdin" {
-  run sh -c 'cat ${PLANS}/long | ${TFMINE} get -i aws_efs_mount_target.efs'
-  assert_success
-  assert_output \
+    run ${TFMINE} get -i aws_efs_mount_target.efs < ${PLANS}/long
+    assert_success
+    assert_output \
 '  + aws_efs_mount_target.efs
       id:                                        <computed>
       dns_name:                                  <computed>
@@ -38,41 +38,47 @@ load './helper'
 }
 
 @test "item not found" {
-  run ${TFMINE} get -f ${PLANS}/long -i flying_circus
-  assert_failure
-  assert_output ""
+    run ${TFMINE} get -f ${PLANS}/long -i flying_circus
+    assert_failure
+    assert_output ""
 }
 
 @test "get item with filter flags - positive" {
 
-  run ${TFMINE} get -f ${PLANS}/create-and-update -i aws_ebs_volume.registry-sync -c
-  assert_success
-  assert_line "  + aws_ebs_volume.registry-sync"
+    run ${TFMINE} get -f ${PLANS}/create-and-update \
+        -i aws_ebs_volume.registry-sync -c
+    assert_success
+    assert_line "  + aws_ebs_volume.registry-sync"
 
-  run ${TFMINE} get -f ${PLANS}/create-and-update -i aws_ebs_volume.logging[0] -u
-  assert_success
-  assert_line "  ~ aws_ebs_volume.logging[0]"
+    run ${TFMINE} get -f ${PLANS}/create-and-update \
+        -i aws_ebs_volume.logging[0] -u
+    assert_success
+    assert_line "  ~ aws_ebs_volume.logging[0]"
 
-  run ${TFMINE} get -f ${PLANS}/create-and-recreate -i aws_ebs_volume.logging[1] -r
-  assert_success
-  assert_line "-/+ aws_ebs_volume.logging[1] (new resource required)"
+    run ${TFMINE} get -f ${PLANS}/create-and-recreate \
+        -i aws_ebs_volume.logging[1] -r
+    assert_success
+    assert_line "-/+ aws_ebs_volume.logging[1] (new resource required)"
 
-  run ${TFMINE} get -f ${PLANS}/destroy -i aws_ebs_volume.redis -d
-  assert_success
-  assert_line "  - aws_ebs_volume.redis"
+    run ${TFMINE} get -f ${PLANS}/destroy -i aws_ebs_volume.redis -d
+    assert_success
+    assert_line "  - aws_ebs_volume.redis"
 }
 
 @test "get item with filter flags - negative" {
 
-  run ${TFMINE} get -f ${PLANS}/destroy -i aws_ebs_volume.redis -c
-  assert_failure
+    run ${TFMINE} get -f ${PLANS}/destroy -i aws_ebs_volume.redis -c
+    assert_failure
 
-  run ${TFMINE} get -f ${PLANS}/create-and-recreate -i aws_ebs_volume.registry-sync -u
-  assert_failure
+    run ${TFMINE} get -f ${PLANS}/create-and-recreate \
+        -i aws_ebs_volume.registry-sync -u
+    assert_failure
 
-  run ${TFMINE} get -f ${PLANS}/create-and-update -i aws_ebs_volume.registry-sync -r
-  assert_failure
+    run ${TFMINE} get -f ${PLANS}/create-and-update \
+        -i aws_ebs_volume.registry-sync -r
+    assert_failure
 
-  run ${TFMINE} get -f ${PLANS}/create-and-update -i aws_ebs_volume.logging[1] -d
-  assert_failure
+    run ${TFMINE} get -f ${PLANS}/create-and-update \
+        -i aws_ebs_volume.logging[1] -d
+    assert_failure
 }
